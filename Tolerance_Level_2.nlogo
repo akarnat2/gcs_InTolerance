@@ -1,11 +1,12 @@
 ; Tolerance and intolerance on a bounded, one-dimensional community.
 ; Sliders control population, neighborhood radius, thresholds and residential preference.
-globals [ histogram-counts initialized? ]
+globals [ histogram-counts initialized? arrival-religion-mode ]
 turtles-own [ religion location tolerance next-tolerance initial-tolerance ]
 
 to setup
   clear-all
   set initialized? true
+  set arrival-religion-mode "Mixed"
   ask patches [ set pcolor white ]
   draw-number-line
   create-turtles initial-population [ initialize-agent ]
@@ -20,6 +21,10 @@ to go
   let incumbents (turtle-set turtles)
   create-turtles arrivals-per-move [
     initialize-agent
+    if member? arrival-religion-mode [ "A" "B" ] [
+      set religion arrival-religion-mode
+      set color ifelse-value (religion = "A") [ blue ] [ orange ]
+    ]
     if same-religion-preference > 0 and neighborhood-radius > 0 [
       let own-religion religion
       if any? incumbents with [ religion = own-religion ] [
@@ -39,7 +44,7 @@ end
 to initialize-agent
   set religion ifelse-value (random-float 1 < religion-a-probability) [ "A" ] [ "B" ]
   set location random-float 1
-  set initial-tolerance random-float 1
+  set initial-tolerance (0.01 + random-float 0.98)
   set tolerance initial-tolerance
   set next-tolerance tolerance
   setxy (100 * location) 0
@@ -58,8 +63,8 @@ to calculate-next-tolerance
     let same-count count local-agents with [ religion = focal-religion ]
     let same-fraction same-count / count local-agents
     let change (0.5 - same-fraction) * tolerance
-    ; The stated rule can exceed 1; cap to preserve the defined state space.
-    set next-tolerance max (list 0 (min (list 1 (tolerance + change))))
+    ; Bound all tolerance updates to the inclusive interval [0.01, 0.99].
+    set next-tolerance max (list 0.01 (min (list 0.99 (tolerance + change))))
   ]
 end
 
@@ -199,6 +204,19 @@ to-report same-religion-share [ candidate residents own-religion ]
   let neighbor-count count neighbors-near-candidate
   if neighbor-count = 0 [ report 0 ]
   report (count neighbors-near-candidate with [ religion = own-religion ]) / neighbor-count
+end
+
+; One shared mode makes the two arrival toggles mutually exclusive.
+to toggle-arrival-religion [ chosen-religion ]
+  ifelse arrival-religion-mode = chosen-religion
+    [ set arrival-religion-mode "Mixed" ]
+    [ set arrival-religion-mode chosen-religion ]
+end
+
+to-report arrival-mode-label
+  if arrival-religion-mode = "A" [ report "A only (ON)" ]
+  if arrival-religion-mode = "B" [ report "B only (ON)" ]
+  report "Mixed (both OFF)"
 end
 @#$#@#$#@
 GRAPHICS-WINDOW
@@ -641,9 +659,64 @@ TEXTBOX
 12
 0.0
 1
+
+BUTTON
+20
+780
+240
+815
+Add Religion-A-Agent Only
+toggle-arrival-religion "A"
+NIL
+1
+T
+OBSERVER
+NIL
+NIL
+NIL
+NIL
+1
+
+BUTTON
+20
+825
+240
+860
+Add Religion-B-Agent Only
+toggle-arrival-religion "B"
+NIL
+1
+T
+OBSERVER
+NIL
+NIL
+NIL
+NIL
+1
+
+MONITOR
+20
+875
+240
+920
+Arrival mode
+arrival-mode-label
+0
+1
+11
+
+TEXTBOX
+20
+930
+240
+1010
+Click again to turn OFF. Choosing the other religion switches modes. Then use One move or Run / pause. Setup resets both to OFF.
+12
+0.0
+1
 @#$#@#$#@
 ## WHAT IS IT?
-A bounded number-line community with two fixed religions (A and B) and evolving tolerance in [0,1]. This implements the proposed local-composition rule; it is a modeling assumption, not an empirically validated law.
+A bounded number-line community with two fixed religions (A and B) and evolving tolerance in [0.01,0.99]. This implements the proposed local-composition rule; it is a modeling assumption, not an empirically validated law.
 
 ## HOW TO USE IT
 Open this file in NetLogo Desktop (6.4 or a later version that imports .nlogo files). Set neighborhood-radius, religion-a-probability, initial-population, arrivals-per-move and histogram-count-limit. Click Setup to initialize. Click One move once per update, or Run / pause for repeated moves. Setup resets the simulation. Read the moves counter for completed updates.
@@ -654,7 +727,7 @@ neighborhood-radius is the shared neighborhood radius in community units, not sc
 Each initial agent and arrival receives:
 - A fixed position x. Initial agents are placed uniformly on [0,1). Newcomer placement uses the preference rule below.
 - Religion A with probability religion-a-probability, otherwise B.
-- Initial tolerance sampled uniformly from [0,1).
+- Initial tolerance sampled uniformly from [0.01,0.99). Updates are capped at 0.01 and 0.99, inclusive.
 NetLogo random-float excludes its upper endpoint. For these continuous uniform distributions, excluding the single endpoint has no probability effect.
 All agents are dots at their actual positions on the same line. A is blue; B is orange. Dot overlap is intentional: there is no artificial relocation. Colors encode religion, not tolerance. Inspect a dot to see its variables.
 
@@ -672,15 +745,15 @@ Let q be the same-religion fraction among the neighbors. The requested rule is:
     change = (0.5 - q) * current-tolerance
     next-tolerance = current-tolerance + change
 The implementation bounds the result:
-    next-tolerance = max(0, min(1, current-tolerance * (1.5 - q)))
-The upper cap is an explicit addition needed to keep tolerance within [0,1]. The raw rule can produce values above 1 (for example, 0.9 with q=0 gives 1.35). The lower cap is defensive; the stated rule cannot produce negative values from a valid state.
+    next-tolerance = max(0.01, min(0.99, current-tolerance * (1.5 - q)))
+Both caps keep tolerance within [0.01,0.99], inclusive. Values below 0.01 become 0.01; values above 0.99 become 0.99. This applies to both religions. Initial agents and newcomers use the same bounded initialization.
 
 ## HISTOGRAM
 The histogram is drawn at Setup and after every move. It shows raw counts of all agents, including arrivals, in 20 bins of width 0.05. The first 19 bins include the lower endpoint and exclude the upper; the last bin includes tolerance exactly 1. Counts always sum to the population.
 The x axis stays [0,1]. The y axis stays [0,histogram-count-limit], with automatic scaling disabled. Since population grows without bound when arrivals-per-move>0, no finite fixed y axis can show every possible future count. Tallest bin reports the actual highest count; Bars clipped? flags overflow. To intentionally change the scale, adjust histogram-count-limit and click Refresh histogram; this does not change the agents or advance time. Leave that control unchanged for comparisons on the same scale.
 
 ## THINGS TO NOTICE
-q=1 halves tolerance. q=0 increases tolerance by 50 percent up to the cap. q=0.5 leaves tolerance unchanged. An agent at exactly zero tolerance remains at zero under this multiplicative rule, even among only other-religion neighbors.
+q=1 halves tolerance down to the floor of 0.01. q=0 increases tolerance by 50 percent up to the cap of 0.99. q=0.5 leaves tolerance unchanged. An agent at 0.01 can increase again when fewer than half of its neighbors share its religion.
 Religious composition and locations do not depend on tolerance. Thus neighbors influence each agent through their religions, but neighbors' tolerance values do not directly spread. This distinction matters when interpreting this model as a model of tolerance diffusion.
 The neighborhood calculation scans the population for each incumbent; the work per move grows approximately quadratically with population. Pause long runs as the community becomes large.
 
@@ -721,6 +794,14 @@ The same-religion-preference slider sets how strongly new arrivals favor neighbo
 Each newcomer considers 20 locations sampled uniformly on [0,1). At each candidate, the score is the number of residents of the newcomer's religion divided by the total number of residents within radius neighborhood-radius. An empty neighborhood has score zero. Candidates are selected at random in proportion to 1 + same-religion-preference * score, so all candidates have positive weight. A neighborhood with 3 same-religion residents out of 4 has a higher score than one with 10 out of 20.
 
 Only residents present at the start of the move contribute to these scores. If there are no residents of the newcomer's religion, or if neighborhood-radius = 0, placement is uniform. If all 20 scores are zero, all 20 candidates have equal weight. Changes to same-religion-preference affect future arrivals. Tolerance updates use the expanded population as in Level 1.
+
+## ARRIVAL RELIGION TOGGLES
+
+After Setup, click Add Religion-A-Agent Only or Add Religion-B-Agent Only to choose the religion of every newcomer. Each move still adds arrivals-per-move agents (the former n_1). The buttons change the arrival mode; they do not advance the simulation themselves. Use One move or Run / pause to advance.
+
+Only one mode can be active. Clicking the active button again turns it off; clicking the other button switches directly to that religion. The Arrival mode monitor shows which mode is ON, or Mixed (both OFF). In Mixed mode, religion-a-probability determines newcomers' religions. Setup resets both modes to OFF and initializes religions using religion-a-probability.
+
+The override is applied before preferred locations are selected, so placement uses the newcomer’s actual religion. Existing agents retain their religions. Tolerance rules and graphs are unchanged.
 @#$#@#$#@
 default
 true
